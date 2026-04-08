@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>网络生活大暴晒</title>
+    <style>
+        body, html { margin: 0; padding: 0; overflow: hidden; background: #fff; font-family: "PingFang SC", "Microsoft YaHei", sans-serif; }
+        
+        /* 开头界面样式 */
+        #start-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #fff; z-index: 500; 
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            transition: opacity 0.8s ease;
+        }
+        #start-overlay h1 { font-size: 48px; font-weight: 300; letter-spacing: 8px; margin-bottom: 40px; color: #000; }
+        #start-overlay p { font-size: 18px; color: #999; margin-bottom: 20px; letter-spacing: 2px; }
+        .start-btn { 
+            background: #000; color: #fff; border: none; padding: 15px 40px; 
+            border-radius: 50px; font-size: 16px; cursor: pointer; transition: 0.3s;
+        }
+        .start-btn:hover { transform: scale(1.1); background: #333; }
+
+        canvas { 
+            position: fixed; top: 0; left: 0; z-index: 5; 
+            transition: transform 0.8s cubic-bezier(0.2, 1, 0.3, 1), border-radius 0.8s;
+            transform-origin: center center;
+        }
+
+        canvas.photo-mode {
+            transform: scale(0.65) translateY(-30px);
+            border-radius: 4px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.15);
+            pointer-events: none; /* 关键：拍照模式下禁止画布响应鼠标事件 */
+        }
+
+        #quiz-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0); 
+            display: flex; align-items: center; justify-content: center; 
+            z-index: 100;
+            transition: opacity 0.6s ease;
+        }
+
+        #dynamic-content-wrapper { width: 100%; height: 100%; }
+        .page-layout { position: relative; width: 100%; height: 100%; z-index: 10; pointer-events: none; }
+        .top-left-title { position: absolute; top: 40px; left: 80px; font-size: 64px; font-weight: 300; color: #000000; letter-spacing: 4px; line-height: 1.2; text-align: left; }
+        .right-options-column { position: absolute; right: 8%; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 15px; align-items: flex-end; z-index: 110; pointer-events: auto; }
+        .btn-wrapper { position: relative; display: flex; flex-direction: column; align-items: flex-end; }
+        .emoji-text-btn { background: none; border: none; padding: 10px; font-size: 36px; color: #000000; cursor: pointer; transition: 0.3s; white-space: nowrap; }
+        .emoji-text-btn:hover { transform: scale(1.2); color: #ff9d8f; }
+        .hover-tip { font-size: 14px; color: #999; opacity: 0; transition: 0.3s; pointer-events: none; position: absolute; top: -10px; right: 10px; }
+        .btn-wrapper:hover .hover-tip { opacity: 1; top: -20px; }
+
+        #action-bar { 
+            position: fixed; bottom: 40px; width: 100%; z-index: 150; display: none; 
+            align-items: center; justify-content: center; gap: 15px;
+        }
+        .action-tip { font-size: 18px; color: #333; font-weight: 300; }
+        .btn-ui { 
+            background: rgba(255,255,255,0.8); backdrop-filter: blur(10px); border: 1px solid #ddd; 
+            padding: 10px 24px; border-radius: 50px; cursor: pointer; font-size: 14px; color: #666; 
+            transition: 0.3s; 
+        }
+        .btn-ui:hover { background: #f5f5f5; border-color: #f56922; color: #f56922; }
+        
+        .btn-primary { background: #000; color: #fff; border: none; }
+        .btn-primary:hover { background: #333; color: #fff; }
+
+        #save-panel {
+            position: fixed; bottom: 8%; width: 100%; z-index: 200;
+            display: none; justify-content: center; gap: 20px; opacity: 0;
+            transition: 0.6s ease;
+        }
+
+        #flash-effect {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #fff; z-index: 300; pointer-events: none; opacity: 0;
+        }
+    </style>
+</head>
+<body>
+
+<div id="start-overlay">
+    <h1>想要来一场网络大暴晒吗？</h1>
+    <p>开始前先记录一下今天吧:）</p>
+    <button class="start-btn" onclick="startExperience()">立即开始</button>
+</div>
+
+<div id="flash-effect"></div>
+
+<div id="quiz-overlay" style="display: none;">
+    <div id="dynamic-content-wrapper"></div>
+</div>
+
+<div id="action-bar">
+    <span class="action-tip">还想晾晒吗？</span>
+    <button class="btn-ui" id="btn-continue" onclick="resetForNewRound()">继续晾晒 →</button>
+    <button class="btn-ui btn-primary" onclick="triggerSnapshot()">我晾晒好了</button>
+</div>
+
+<div id="save-panel">
+    <button class="btn-ui btn-primary" onclick="saveToLocal()">保存到相册</button>
+    <button class="btn-ui" onclick="backToMain()">返回主界面</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script>
+// --- 1. 配置 ---
+const allFiles = ["厕纸_疯狂_阴_不饿.png", "荷包蛋_难过_晴_饿.png", "馄饨_呆滞_下雨_饿.png", "三文鱼_开心_晴_饿.png", "袜子_平静_大风_不饿.png", "香蕉_平静_晴_饿.png", "红薯_开心_下雨_饿.png", "海绵_无语_下雨_不饿.png", "番茄_愤怒_晴_饿.png", "馒头_呆滞_大风_饿.png", "向日葵_平静_晴_不饿.png", "大蒜_开心_大风_饿.png", "拖鞋_平静_阴_不饿.png", "叶子_难过_阴_不饿.png","饺子_疯狂_晴_饿.png", "木耳_无语_下雨_饿.png","方便面_呆滞_晴_饿.png","橘子_愤怒_阴_饿.png", "红糖馒头_呆滞_阴_饿.png","豆腐_难过_下雨_饿.png","海螺_开心_晴_不饿.png", "手套_疯狂_晴_不饿.png"];
+
+const questions = [
+    { q: "今 天<br>你 是 什 么 ？", opts: ["平静", "难过", "无语", "开心", "愤怒", "呆滞", "疯狂"], labels: ["-ω-", "；﹏；", "(._.)", "(*´▽｀*)", "(♯｀∧´)", "(⊙_☉)", "( ´Д`)"], tips: ["我很平静", "我很难过", "我很无语", "我很开心", "我很愤怒", "我很呆滞", "我很疯狂"], image: "三文鱼_开心_晴_饿.png" },
+    { q: "今 天 的<br>天 气 如 何 ？", opts: ["晴", "阴", "下雨", "大风"], labels: ["晴", "阴", "下雨", "大风"], image: "馒头_呆滞_大风_饿.png" },
+    { q: "你 现 在<br>饿 吗 ？", opts: ["饿", "不饿", "不知道"], labels: ["饿", "不饿", "不知道"], image: "饺子_疯狂_晴_饿.png" },
+    { q: "你 想 在 哪 里<br>晾 晒 ？", opts: ["家", "社区", "公园", "广场大街"], labels: ["家", "社区", "公园", "广场大街"], image: "荷包蛋_难过_晴_饿.png" }
+];
+
+let answers = [];
+let currentQ = 0;
+let mouse = new THREE.Vector2(0, 0);
+let sceneObjectsMap = { "家": [], "社区": [], "公园": [], "广场大街": [] };
+let currentSceneKey = "家";
+let currentActiveObject = null;
+
+// --- 2. 初始化 ---
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(window.innerWidth/-2, window.innerWidth/2, window.innerHeight/2, window.innerHeight/-2, 1, 1000);
+camera.position.z = 50;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+document.body.appendChild(renderer.domElement);
+
+const texLoader = new THREE.TextureLoader();
+const backgroundTextures = { "家": texLoader.load('background.jpg'), "社区": texLoader.load('background2.jpg'), "公园": texLoader.load('background3.jpg'), "广场大街": texLoader.load('background4.jpg') };
+
+let backgroundMesh = new THREE.Mesh(new THREE.PlaneGeometry(window.innerWidth, window.innerHeight), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+backgroundMesh.position.z = -10;
+backgroundMesh.visible = false; 
+scene.add(backgroundMesh);
+
+// --- 3. 核心交互流程 ---
+
+function startExperience() {
+    const startOverlay = document.getElementById('start-overlay');
+    startOverlay.style.opacity = '0';
+    setTimeout(() => {
+        startOverlay.style.display = 'none';
+        initQuiz();
+    }, 800);
+}
+
+function resetForNewRound() {
+    answers = []; currentQ = 0;
+    document.getElementById('action-bar').style.display = 'none';
+    initQuiz();
+}
+
+function triggerSnapshot() {
+    const flash = document.getElementById('flash-effect');
+    const actionBar = document.getElementById('action-bar');
+    const savePanel = document.getElementById('save-panel');
+    const canvas = renderer.domElement;
+    actionBar.style.display = 'none';
+    flash.style.transition = 'none';
+    flash.style.opacity = '1';
+    setTimeout(() => {
+        flash.style.transition = 'opacity 0.8s ease-out';
+        flash.style.opacity = '0';
+        canvas.classList.add('photo-mode'); // 进入照片模式
+        savePanel.style.display = 'flex';
+        setTimeout(() => { savePanel.style.opacity = '1'; }, 100);
+    }, 50);
+}
+
+function backToMain() {
+    const canvas = renderer.domElement;
+    const savePanel = document.getElementById('save-panel');
+    const startOverlay = document.getElementById('start-overlay');
+    savePanel.style.opacity = '0';
+    setTimeout(() => {
+        savePanel.style.display = 'none';
+        canvas.classList.remove('photo-mode'); // 退出照片模式
+        
+        // 彻底清除场景
+        Object.keys(sceneObjectsMap).forEach(key => {
+            sceneObjectsMap[key].forEach(obj => {
+                scene.remove(obj.mesh);
+                if(obj.mesh.geometry) obj.mesh.geometry.dispose();
+                if(obj.mesh.material) {
+                    if(obj.mesh.material.map) obj.mesh.material.map.dispose();
+                    obj.mesh.material.dispose();
+                }
+            });
+            sceneObjectsMap[key] = []; 
+        });
+
+        answers = []; currentQ = 0;
+        currentActiveObject = null;
+        isDraggingInteraction = false;
+        backgroundMesh.visible = false;
+        startOverlay.style.display = 'flex';
+        setTimeout(() => { startOverlay.style.opacity = '1'; }, 50);
+    }, 500);
+}
+
+function saveToLocal() {
+    const link = document.createElement('a');
+    link.download = '我的晾晒记录.png';
+    link.href = renderer.domElement.toDataURL('image/png');
+    link.click();
+}
+
+// --- 4. 物理逻辑 (维持原样) ---
+
+function createConstraints(pArr, cArr, seg) {
+    const getIdx = (x, y) => y * (seg + 1) + x;
+    for (let y = 0; y <= seg; y++) {
+        for (let x = 0; x <= seg; x++) {
+            if (x < seg) addC(getIdx(x, y), getIdx(x+1, y), pArr, cArr);
+            if (y < seg) addC(getIdx(x, y), getIdx(x, y+1), pArr, cArr);
+            if (x < seg && y < seg) addC(getIdx(x, y), getIdx(x+1, y+1), pArr, cArr);
+        }
+    }
+}
+function addC(a, b, pArr, cArr) { cArr.push({ a, b, dist: pArr[a].curr.distanceTo(pArr[b].curr) }); }
+function solve(pArr, cArr, skip) {
+    for (let n = 0; n < 8; n++) {
+        cArr.forEach(c => {
+            const p1 = pArr[c.a], p2 = pArr[c.b];
+            const diff = p2.curr.clone().sub(p1.curr);
+            const dist = diff.length();
+            if(dist === 0) return;
+            const corr = diff.multiplyScalar((dist - c.dist) / dist * 0.5);
+            if (c.a !== skip) p1.curr.add(corr);
+            if (c.b !== skip) p2.curr.sub(corr);
+        });
+    }
+}
+
+let interactionMesh = null, interactionParticles = [], interactionConstraints = [];
+let isDraggingInteraction = false;
+
+function initInteractionEffect(imageFile) {
+    removeInteractionEffect();
+    texLoader.load(imageFile, (tex) => {
+        const size = 650, seg = 30;
+        interactionMesh = new THREE.Mesh(new THREE.PlaneGeometry(size, size, seg, seg), new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide }));
+        interactionMesh.position.z = 20; scene.add(interactionMesh);
+        const pos = interactionMesh.geometry.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+            const v = new THREE.Vector3().fromBufferAttribute(pos, i);
+            interactionParticles.push({ curr: v.clone(), old: v.clone(), origin: v.clone() });
+        }
+        createConstraints(interactionParticles, interactionConstraints, seg);
+    });
+}
+function removeInteractionEffect() {
+    if(interactionMesh) { scene.remove(interactionMesh); interactionMesh = null; }
+    interactionParticles = []; interactionConstraints = [];
+}
+
+function initQuiz() {
+    const q = questions[currentQ];
+    const wrapper = document.getElementById('dynamic-content-wrapper');
+    const overlay = document.getElementById('quiz-overlay');
+    wrapper.innerHTML = ''; overlay.style.opacity = '1'; overlay.style.display = 'flex';
+    Object.values(sceneObjectsMap).forEach(list => list.forEach(obj => obj.mesh.visible = false));
+    if(backgroundMesh) backgroundMesh.visible = false;
+    const layout = document.createElement('div');
+    layout.className = 'page-layout';
+    layout.innerHTML = `<div class="top-left-title">${q.q}</div>`;
+    const col = document.createElement('div');
+    col.className = 'right-options-column';
+    q.opts.forEach((opt, i) => {
+        const btnWrapper = document.createElement('div');
+        btnWrapper.className = 'btn-wrapper';
+        if (currentQ === 0 && q.tips) {
+            const tip = document.createElement('span'); tip.className = 'hover-tip'; tip.innerText = q.tips[i];
+            btnWrapper.appendChild(tip);
+        }
+        const btn = document.createElement('button');
+        btn.className = 'emoji-text-btn'; btn.innerText = q.labels[i];
+        btn.onclick = () => {
+            answers.push(opt); currentQ++;
+            if (currentQ < questions.length) initQuiz();
+            else matchAndSpawn();
+        };
+        btnWrapper.appendChild(btn); col.appendChild(btnWrapper);
+    });
+    layout.appendChild(col); wrapper.appendChild(layout);
+    initInteractionEffect(q.image);
+}
+
+function matchAndSpawn() {
+    removeInteractionEffect();
+    document.getElementById('quiz-overlay').style.opacity = '0';
+    setTimeout(() => {
+        document.getElementById('quiz-overlay').style.display = 'none';
+        currentSceneKey = answers[3];
+        if(backgroundTextures[currentSceneKey]) {
+            backgroundMesh.material.map = backgroundTextures[currentSceneKey];
+            backgroundMesh.material.needsUpdate = true;
+        }
+        backgroundMesh.visible = true; 
+        Object.keys(sceneObjectsMap).forEach(key => {
+            const isCurrent = (key === currentSceneKey);
+            sceneObjectsMap[key].forEach(obj => obj.mesh.visible = isCurrent);
+        });
+        const mood = answers[0], weather = answers[1], hunger = answers[2];
+        let matched = allFiles.filter(f => {
+            const hasMood = f.includes(mood);
+            const hasWeather = f.includes(weather);
+            const hasHunger = (hunger === "饿") ? (f.includes("饿") && !f.includes("不饿")) : f.includes(hunger);
+            return hasMood && hasWeather && hasHunger;
+        });
+        if (matched.length === 0) matched = allFiles.filter(f => f.includes(mood) && f.includes(weather));
+        if (matched.length === 0) matched = allFiles.filter(f => f.includes(mood));
+        const finalFile = matched.length > 0 ? matched[Math.floor(Math.random()*matched.length)] : allFiles[0];
+        spawnObject(finalFile);
+    }, 600);
+}
+
+function spawnObject(file) {
+    texLoader.load(file, (tex) => {
+        const size = 100, segs = 25; 
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(size, size, segs, segs), new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide, alphaTest:0.4 }));
+        const countInThisScene = sceneObjectsMap[currentSceneKey].length;
+        mesh.position.set(0, 0, 10 + countInThisScene);
+        mesh.rotation.z = (Math.random() - 0.5) * 0.2;
+        scene.add(mesh);
+        const parts = [], cons = [], pos = mesh.geometry.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+            const v = new THREE.Vector3().fromBufferAttribute(pos, i);
+            parts.push({ curr: v.clone(), old: v.clone(), origin: v.clone() });
+        }
+        createConstraints(parts, cons, segs);
+        const objData = { mesh, parts, cons, segs, isFixed: false };
+        sceneObjectsMap[currentSceneKey].push(objData);
+        currentActiveObject = objData; 
+        document.getElementById('action-bar').style.display = 'flex';
+    });
+}
+
+function update() {
+    if (interactionMesh) {
+        interactionParticles.forEach(p => {
+            p.curr.lerp(p.origin, 0.05);
+            if (isDraggingInteraction) {
+                const d = p.curr.distanceTo(new THREE.Vector3(mouse.x, mouse.y, 0));
+                if (d < 160) p.curr.add(p.curr.clone().sub(new THREE.Vector3(mouse.x, mouse.y, 0)).normalize().multiplyScalar((180-d)*0.25));
+            }
+            const v = p.curr.clone().sub(p.old).multiplyScalar(0.95);
+            p.old.copy(p.curr); p.curr.add(v);
+        });
+        solve(interactionParticles, interactionConstraints, -1);
+        const attr = interactionMesh.geometry.attributes.position;
+        interactionParticles.forEach((p, i) => attr.setXYZ(i, p.curr.x, p.curr.y, p.curr.z));
+        attr.needsUpdate = true;
+    }
+    if (sceneObjectsMap[currentSceneKey]) {
+        sceneObjectsMap[currentSceneKey].forEach(obj => {
+            if (obj.isFixed) return;
+            const { parts, cons, mesh } = obj;
+            const isBeingDragged = (obj === currentActiveObject && isDraggingInteraction);
+            parts.forEach(p => {
+                p.curr.lerp(p.origin, 0.08); 
+                if (isBeingDragged) {
+                    const localMouse = new THREE.Vector3(mouse.x - mesh.position.x, mouse.y - mesh.position.y, 0);
+                    const d = p.curr.distanceTo(localMouse);
+                    if (d < 30) p.curr.add(p.curr.clone().sub(localMouse).normalize().multiplyScalar((40 - d) * 0.5));
+                }
+                const v = p.curr.clone().sub(p.old).multiplyScalar(0.92);
+                p.old.copy(p.curr); p.curr.add(v);
+            });
+            if (isBeingDragged) {
+                const targetPos = new THREE.Vector3(mouse.x, mouse.y, mesh.position.z);
+                const moveVec = targetPos.clone().sub(mesh.position);
+                mesh.position.lerp(targetPos, 0.1);
+                mesh.rotation.z += (-moveVec.x * 0.08 - mesh.rotation.z) * 0.01;
+            }
+            solve(parts, cons, -1);
+            const attr = mesh.geometry.attributes.position;
+            parts.forEach((p, i) => attr.setXYZ(i, p.curr.x, p.curr.y, p.curr.z));
+            attr.needsUpdate = true;
+        });
+    }
+}
+
+function animate() { requestAnimationFrame(animate); update(); renderer.render(scene, camera); }
+
+// --- 5. 修正：添加模式判断，禁止在保存界面移动物件 ---
+window.addEventListener('mousedown', () => { 
+    // 检查画布是否具有 'photo-mode' 类。如果有，直接返回，不执行任何拖拽逻辑。
+    if (renderer.domElement.classList.contains('photo-mode')) return;
+
+    isDraggingInteraction = true; 
+    if (!interactionMesh && backgroundMesh.visible) {
+        const currentList = sceneObjectsMap[currentSceneKey];
+        for(let i = currentList.length-1; i>=0; i--){
+            const obj = currentList[i];
+            const d = new THREE.Vector2(mouse.x, mouse.y).distanceTo(new THREE.Vector2(obj.mesh.position.x, obj.mesh.position.y));
+            if(d < 60) { obj.isFixed = false; currentActiveObject = obj; break; }
+        }
+    }
+});
+
+window.addEventListener('mousemove', (e) => {
+    mouse.x = e.clientX - window.innerWidth / 2;
+    mouse.y = -(e.clientY - window.innerHeight / 2);
+});
+window.addEventListener('mouseup', () => {
+    isDraggingInteraction = false;
+    if (currentActiveObject) { currentActiveObject.isFixed = true; currentActiveObject = null; }
+});
+
+animate();
+</script>
+</body>
+</html>
